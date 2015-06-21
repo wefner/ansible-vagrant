@@ -216,7 +216,7 @@ Since this is for education purposes, `vagrant` is the master password for this 
 
 ## Common
 - [X] provision machines without disk
-- [ ] inventory in json dump
+- [X] inventory in json dump
 - [X] dynamic inventory
 - [ ] fdisk extra_disk automatically
 

@@ -21,4 +21,4 @@ After that, `httpd` role is installing Apache and setting up Apache and a failov
 
 `$ ansible-playbook` -i enviro/vagrant/hosts lamp.yml --vault-password-file=secret.txt -vv --skip-tags=glusterfs`
 
-You can bring up more machines and run again this playbook. Nodes will be appended to cluster with Apache
+You can bring up more machines and run again this playbook. Nodes will be appended to the cluster
