@@ -4,155 +4,89 @@
 # based on:
 # http://tjheeta.github.io/2014/12/01/ansible-vagrant-multiple-nodes.html
 
-hosts = [
-  {
-    :name => :proxy1,
-    :group => "proxy",
-    :forwards => { 443 => 4443 },
-    :sshport => { 22 => 2210 },
-    :ip => "172.16.1.120"
-  },
-  {
-    :name => :proxy2,
-    :group => "proxy",
-    :forwards => { 443 => 4444 },
-    :sshport => { 22 => 2211 },
-    :ip => "172.16.1.121"
-  },
-  {
-    :name => :webserver1,
-    :group => "web",
-    :forwards => { 80 => 8080, 5405 => 5000 },
-    :sshport => { 22 => 2212 },
-    :ip => "172.16.1.100",
-    :disk => "./tmp/extra_disk1.vdi"
-  },
-  {
-    :name => :webserver2,
-    :group => [ "web", "gluster_slaves" ],
-    :forwards => { 80 => 8081, 5405 => 5001 },
-    :sshport => { 22 => 2213 },
-    :ip => "172.16.1.101",
-    :disk => "./tmp/extra_disk2.vdi"
-  },
-  {
-    :name => :webserver3,
-    :group => [ "web", "gluster_slaves" ],
-    :forwards => { 80 => 8082, 5405 => 5002 },
-    :sshport => { 22 => 2214 },
-    :ip => "172.16.1.102",
-    :disk => "./tmp/extra_disk3.vdi"
-  },
-  {
-    :name => :webserver4,
-    :group => [ "web", "gluster_slaves" ],
-    :forwards => { 80 => 8081, 5405 => 5001 },
-    :sshport => { 22 => 2220 },
-    :ip => "172.16.1.105",
-  },
-  {
-    :name => :webserver5,
-    :group => [ "web", "gluster_slaves" ],
-    :forwards => { 80 => 8082, 5405 => 5002 },
-    :sshport => { 22 => 2224 },
-    :ip => "172.16.1.106",
-  },
-  {
-    :name => :mgmt1,
-    :group => [ "db", "mgmt" ],
-    :forwards => { 3306 => 3333 },
-    :sshport => { 22 => 2215 },
-    :ip => "172.16.1.110"
-  },
-  {
-    :name => :datanode1,
-    :group => [ "db", "datanodes" ],
-    :forwards => { 3306 => 3334 },
-    :sshport => { 22 => 2216 },
-    :ip => "172.16.1.111"
-  },
-  {
-    :name => :sqlnode1,
-    :group => [ "db", "sqlnodes" ],
-    :forwards => { 3306 => 3335 },
-    :sshport => { 22 => 2217 },
-    :ip => "172.16.1.112"
-  }
-]
+require './inventory.rb'
+# TODO: make hosts as global in a better way
+hosts = @hosts
 
 VAGRANTFILE_API_VERSION = "2"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-
-config.ssh.forward_agent = true
-config.vm.boot_timeout = 90
-config.vm.graceful_halt_timeout = 10
-
-config.vm.box = "chef/centos-6.5"
-config.vm.provision :shell, path: "libselinux.sh"
-
-# 256MB RAM for all hosts
-config.vm.provider "virtualbox" do |vb|
-  vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
-  vb.customize ["modifyvm", :id, "--memory", "256"]
-end
-
-  # Creates "inventory" Hash including "all" group
-inventory = { "all" => [] }
-hosts.each do | opts |
-  if ! opts[:group].kind_of?(Array)
-    if ! inventory.has_key?(opts[:group])
-      inventory[opts[:group]] = [ opts[:name] ]
-    else
-      inventory[opts[:group]].push(opts[:name])
-    end
-      inventory["all"].push(opts[:name])
-  else
-    opts[:group].each do | groups |
-    inventory["all"].push(opts[:name]) unless inventory["all"].include?(opts[:name])
-    if ! inventory.has_key?(groups)
-      inventory[groups] = [ opts[:name] ]
-    else
-    inventory[groups].push(opts[:name])
-    end
+  config.ssh.forward_agent = true
+  config.hostmanager.enabled = true
+  config.hostmanager.manage_host = true
+  config.hostmanager.ignore_private_ip = false
+  config.hostmanager.include_offline = true
+  # VM configuration 
+  config.vm.box = "chef/centos-6.5"
+  config.vm.provision :shell, path: "libselinux.sh"
+  config.vm.boot_timeout = 90
+  config.vm.graceful_halt_timeout = 10
+  
+  # 256MB RAM for all hosts
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
+    vb.customize ["modifyvm", :id, "--memory", "256"]
   end
-end
-end
+  
+  # Creates "inventory" Hash including "all" group
+  inventory = { "all" => [] }
+  hosts.each do | host |
+    inventory["all"].push(host[:name])
 
-# setting up instance parameters
-hosts.each_with_index do | opts, index |
-  config.vm.define(opts[:name]) do |config|
-    config.vm.synced_folder ".", "/vagrant", disabled: true
-    config.vm.hostname = "%s" % [ opts[:name].to_s ]
-    config.vm.network :private_network, ip: opts[:ip].to_s
-    opts[:forwards].each do |guest_port,host_port|
-      config.vm.network :forwarded_port, guest: guest_port, host: host_port, auto_correct: true
-    end if opts[:forwards]
-    opts[:sshport].each do |guest_port,host_port|
-      config.vm.network :forwarded_port, guest: guest_port, host: host_port, auto_correct: true, id: "ssh"
-    end if opts[:sshport]
-    config.vm.provider :virtualbox do |vb|
-    # create disk if in Hash
-    if opts.has_key?(:disk)
-      unless File.exist?(opts[:disk].to_s)
-        vb.customize ['createhd', '--filename', opts[:disk].to_s, '--size', 500]
-        vb.customize ['storageattach', :id, '--storagectl', 'IDE Controller', '--port', 1, '--device', 0, '--type', 'hdd', '--medium', opts[:disk].to_s]
-      end
+    if host.has_key?(:groups)
+      host[:groups].each do | group |
+        inventory["all"].push(host[:name]) unless inventory["all"].include?(host[:name])        
+        (inventory[group] ||= [] ) << host[:name] # force array creation
+      end 
     end
-    config.vm.provision :ansible do |ansible|
-    # ansible.verbose = "vvvv"
-    ansible.playbook       = "code/tools/pubkeys.yml"
-    ansible.groups         = inventory
-    ansible.sudo           = true
-    ansible.extra_vars = { ansible_ssh_user: 'vagrant',
-                           pub_file: '~/.ssh/id_rsa.pub',
-                           user: 'vagrant'
-                          }
-    # Copy autogenerated hosts to real enviro path
-    config.vm.provision :host_shell do | host_shell |
-      host_shell.inline = 'cp .vagrant/provisioners/ansible/inventory/vagrant_ansible_inventory code/enviro/vagrant/hosts'
-    end
-         end
+
+  end
+  
+  # setting up instance parameters
+  hosts.each_with_index do | host, index |
+    config.vm.define(host[:name]) do |config|
+      config.vm.synced_folder ".", "/vagrant", disabled: true
+      config.vm.hostname = "%s" % [ host[:name].to_s ]
+      config.vm.network :private_network, ip: host[:ip].to_s
+      
+      if host[:forwards]
+        host[:forwards].each do |guest_port,host_port|
+          config.vm.network :forwarded_port, guest: guest_port, host: host_port, auto_correct: true
+        end
+      end 
+      
+      if host[:sshport]
+        host[:sshport].each do |guest_port,host_port|
+          config.vm.network :forwarded_port, guest: guest_port, host: host_port, auto_correct: true, id: "ssh"
+        end
+      end 
+
+      config.vm.provider :virtualbox do |vb|
+        
+        # create disk if in Hash
+        if host.has_key?(:disk)
+          unless File.exist?(host[:disk].to_s)
+            vb.customize ['createhd', '--filename', host[:disk].to_s, '--size', 500]
+            vb.customize ['storageattach', :id, '--storagectl', 'IDE Controller', '--port', 1, '--device', 0, '--type', 'hdd', '--medium', host[:disk].to_s]
+          end
+        end
+        
+        config.vm.provision :ansible do |ansible|
+          # ansible.verbose = "vvvv"
+          ansible.playbook   = "code/tools/pubkeys.yml"
+          ansible.groups     = inventory
+          ansible.sudo       = true
+          ansible.extra_vars = { 
+            ansible_ssh_user: 'vagrant',
+            pub_file: '~/.ssh/id_rsa.pub',
+            user: 'vagrant'
+          }
+        end
+      
+        # Copy autogenerated hosts to real enviro path
+        config.vm.provision :host_shell do | host_shell |
+          host_shell.inline = 'cp .vagrant/provisioners/ansible/inventory/vagrant_ansible_inventory hosts'
+        end
       end
     end
   end
